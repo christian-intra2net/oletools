@@ -205,16 +205,31 @@ def read_null_terminated_string(stream):
     """
     Read chars until 0-byte is encountered
 
-    Based on oledump.ReadNullTerminatedString(data)
+    Based on oledump.ReadNullTerminatedString(data), but returns unicode
     """
-    chars = []
+    chars = []   # array of bytes
     while True:
-        char = stream.read(1)
-        if char == '\x00':
+        char = ord(stream.read(1))
+        if char == 0:
             break
         else:
             chars.append(char)
-    return ''.join(chars)
+    if sys.version_info.major == 2:
+        return u''.join(unichr(char) for char in chars)
+    else:
+        # have to guess an encoding :-(
+        result = None
+        chars = bytes(chars)
+        for encoding in 'utf8', 'utf16', 'latin1':
+            try:
+                result = chars.decode(encoding)
+            except UnicodeError:
+                pass
+            if result is not None:
+                return result
+        logging.warning('failed to guess encoding for string, falling back to '
+                        'ascii with replace')
+        return chars.encode('ascii', errors='replace')
 
 
 def get_embed_info(stream):
