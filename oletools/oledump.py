@@ -236,6 +236,28 @@ def get_embed_info(stream):
     return (filename, pathname, temppathname), size_embedded
 
 
+def do_dump(stream, name, embedded_size):
+    """ dump data from stream to file with given name, up to embedded_size """
+    logging.info('      dumping to ' + name)
+    read_count = 0
+    with open(name, 'wb') as writer:
+        to_read = min(CHUNK_SIZE, embedded_size - read_count)
+        while to_read:
+            chunk = stream.read(to_read)
+            if len(chunk) != to_read:
+                logging.warning('Wanted to read {0} but only got {1}'
+                                .format(to_read, len(chunk)))
+                break
+            writer.write(chunk)
+            read_count += len(chunk)
+            to_read = min(CHUNK_SIZE, embedded_size - read_count)
+
+    if read_count != embedded_size:
+        logging.warning('Read count {0} does not match '
+                        'expectation {1}'
+                        .format(read_count, embedded_size))
+
+
 def main(cmd_line_args=None):
     """ Main function, called when running file as script
 
@@ -300,24 +322,8 @@ def main(cmd_line_args=None):
                 name = os.path.join(args.target_dir,
                                     'oledump{0}{1}'.format(output_count,
                                                            extension))
-                logging.info('      dumping to ' + name)
-                read_count = 0
-                with open(name, 'wb') as writer:
-                    to_read = min(CHUNK_SIZE, embedded_size - read_count)
-                    if not to_read:
-                        break
-                    chunk = stream.read(to_read)
-                    if len(chunk) != to_read:
-                        logging.warning('Wanted to read {0} but only got {1}'
-                                        .format(to_read, len(chunk)))
-                        break
-                    writer.write(chunk)
-                    read_count += len(chunk)
+                do_dump(stream, name, embedded_size)
 
-                if read_count != embedded_size:
-                    logging.warning('Read count {0} does not match '
-                                    'expectation {1}'
-                                    .format(read_count, embedded_size))
                 output_count += 1
 
     if output_count:
