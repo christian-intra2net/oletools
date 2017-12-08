@@ -42,7 +42,7 @@ Modifications to original include:
 
 # -----------------------------------------------------------------------------
 # CHANGELOG:
-# 2017-10-06 v0.01 CH: - first version based on xls_parser
+# 2017-12-08 v0.01 CH: - handle all old ole file types (doc, ppt, xls)
 
 # -----------------------------------------------------------------------------
 # TODO:
