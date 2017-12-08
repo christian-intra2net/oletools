@@ -125,7 +125,7 @@ def parse_args(cmd_line_args=None):
     return args
 
 
-def open_file(filename):
+def find_ole(filename):
     """ try to open somehow as zip or ole or so; raise exception if fail """
     try:
         if olefile.isOleFile(filename):
@@ -299,8 +299,8 @@ def main(cmd_line_args=None):
     # loop over file name arguments
     for filename in args.input_files:
 
-        # loop over files found within filename
-        for ole in open_file(filename):
+        # loop over ole files found within filename
+        for ole in find_ole(filename):
             if ole is None:
                 return_value = max(return_value, RETURN_OPEN_FAIL)
                 continue
