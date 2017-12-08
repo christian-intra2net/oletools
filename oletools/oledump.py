@@ -76,6 +76,8 @@ except ImportError:
     del PARENT_DIR
     from oletools.thirdparty import olefile
 
+from ppt_record_parser import is_ppt, PptFile, PptRecordExOleVbaActiveXAtom
+
 
 # return values from main
 RETURN_NO_EXTRACT = 0      # all input files were clean
@@ -88,7 +90,7 @@ RETURN_STREAM_FAIL = 4     # failed to open an OLE stream
 CHUNK_SIZE = 4096    # 4k
 
 # pattern for output files. Will replace: 0 --> count; 1 --> extension
-FILE_NAME_PATTERN = 'ole-object-{0}.{1}'
+FILE_NAME_PATTERN = 'ole-object-{0:02d}{1}'
 
 
 def existing_file(filename):
@@ -110,7 +112,7 @@ def parse_args(cmd_line_args=None):
                         help='Directory to extract files to. File names are '
                              '0.ext, 1.ext ... . Default: current working dir')
     parser.add_argument('-v', '--verbose', action='store_true',
-                        help='verbose mode, not implemented yet')
+                        help='verbose mode, set logging to DEBUG (else: INFO)')
     parser.add_argument('-i', '--more-input', metavar='FILE',
                         type=existing_file,
                         help='Additional file to parse (same as positional '
@@ -129,14 +131,43 @@ def parse_args(cmd_line_args=None):
     return args
 
 
+def find_ole_in_ppt(filename):
+    """ find ole streams in ppt """
+    for stream in PptFile(filename).iter_streams():
+        for record in stream.iter_records():
+            if isinstance(record, PptRecordExOleVbaActiveXAtom):
+                ole = None
+                try:
+                    data_start = next(record.iter_uncompressed())
+                    if data_start[:len(olefile.MAGIC)] != olefile.MAGIC:
+                        continue   # could be an ActiveX control or VBA Storage
+
+                    # otherwise, this should be an OLE object
+                    ole = record.get_data_as_olefile()
+                    yield ole
+                except IOError:
+                    logging.warning('Error reading data from {0} stream or '
+                                    'interpreting it as OLE object'
+                                    .format(stream.name), exc_info=True)
+                finally:
+                    if ole is not None:
+                        ole.close()
+
+
 def find_ole(filename):
     """ try to open somehow as zip or ole or so; raise exception if fail """
     try:
         if olefile.isOleFile(filename):
-            logging.info('is ole file: ' + filename)
-            ole = olefile.OleFileIO(filename)
-            yield ole
-            ole.close()
+            if is_ppt(filename):
+                logging.info('is ppt file: ' + filename)
+                for ole in find_ole_in_ppt(filename):
+                    yield ole
+                    ole.close()
+            else:
+                logging.info('is ole file: ' + filename)
+                ole = olefile.OleFileIO(filename)
+                yield ole
+                ole.close()
         elif is_zipfile(filename):
             logging.info('is zip file: ' + filename)
             zipper = ZipFile(filename, 'r')
