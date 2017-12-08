@@ -130,22 +130,27 @@ def open_file(filename):
     try:
         if olefile.isOleFile(filename):
             logging.info('is ole file: ' + filename)
-            yield olefile.OleFileIO(filename)
+            ole = olefile.OleFileIO(filename)
+            yield ole
+            ole.close()
         elif is_zipfile(filename):
             logging.info('is zip file: ' + filename)
             zipper = ZipFile(filename, 'r')
             for subfile in zipper.namelist():
                 head = b''
                 try:
-                    head = zipper.open(subfile).read(len(olefile.MAGIC))
+                    with zipper.open(subfile) as file_handle:
+                        head = file_handle.read(len(olefile.MAGIC))
                 except RuntimeError:
                     logging.error('zip is encrypted: ' + filename)
                     yield None
 
                 if head == olefile.MAGIC:
                     logging.info('  unzipping ole: ' + subfile)
-                    yield olefile.OleFileIO(zipper.open(subfile)
-                                            .read(MAX_SIZE))
+                    with zipper.open(subfile) as file_handle:
+                        ole = olefile.OleFileIO(file_handle)
+                        yield ole
+                        ole.close()
                 else:
                     logging.debug('unzip skip: ' + subfile)
         else:
@@ -174,8 +179,10 @@ def ole_iter_streams(ole):
             'is stream of size {}'.format(direntry.size) if is_stream else
             'no stream ({})'.format(direntry.entry_type)))
         if is_stream:
+            stream = ole._open(direntry.isectStart, direntry.size)
             yield is_orphan, None if is_orphan else direntry.name, \
-                  direntry.size, ole._open(direntry.isectStart, direntry.size)
+                  direntry.size, stream
+            stream.close()
 
 
 def has_embed_header(stream, stream_size):
