@@ -64,16 +64,17 @@ from zipfile import is_zipfile, ZipFile
 from argparse import ArgumentParser, ArgumentTypeError
 from struct import unpack
 
-# little hack to allow absolute imports even if oletools is not installed.
-# Copied from olevba.py
-_thismodule_dir = os.path.normpath(os.path.abspath(os.path.dirname(__file__)))  # pylint: disable=invalid-name
-_parent_dir = os.path.normpath(os.path.join(_thismodule_dir, '..'))             # pylint: disable=invalid-name
-del _thismodule_dir
-if _parent_dir not in sys.path:
-    sys.path.insert(0, _parent_dir)
-del _parent_dir
-
-from oletools.thirdparty import olefile
+try:
+    from oletools.thirdparty import olefile
+except ImportError:
+    # little hack to allow absolute imports even if oletools is not installed.
+    # Copied from olevba.py
+    PARENT_DIR = os.path.normpath(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    if PARENT_DIR not in sys.path:
+        sys.path.insert(0, PARENT_DIR)
+    del PARENT_DIR
+    from oletools.thirdparty import olefile
 
 
 # return values from main
@@ -83,8 +84,11 @@ RETURN_ARGUMENT_ERR = 2    # reserved for parse_args
 RETURN_OPEN_FAIL = 3       # failed to open a file
 RETURN_STREAM_FAIL = 4     # failed to open an OLE stream
 
-MAX_SIZE = 100*1024*1024   # 100 MB
-CHUNK_SIZE = 4096    # copy 4k blocks from stream to file
+# size of blocks to copy from stream to file
+CHUNK_SIZE = 4096    # 4k
+
+# pattern for output files. Will replace: 0 --> count; 1 --> extension
+FILE_NAME_PATTERN = 'ole-object-{0}.{1}'
 
 
 def existing_file(filename):
@@ -180,8 +184,8 @@ def ole_iter_streams(ole):
             'no stream ({})'.format(direntry.entry_type)))
         if is_stream:
             stream = ole._open(direntry.isectStart, direntry.size)
-            yield is_orphan, None if is_orphan else direntry.name, \
-                  direntry.size, stream
+            yield (is_orphan, None if is_orphan else direntry.name,
+                   direntry.size, stream)
             stream.close()
 
 
@@ -342,8 +346,8 @@ def main(cmd_line_args=None):
 
                 # dump
                 name = os.path.join(args.target_dir,
-                                    'oledump{0}{1}'.format(output_count,
-                                                           extension))
+                                    FILE_NAME_PATTERN.format(output_count,
+                                                             extension))
                 do_dump(stream, name, embedded_size)
 
                 output_count += 1
