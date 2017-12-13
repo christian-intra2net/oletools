@@ -56,9 +56,11 @@ class TestOledump(unittest.TestCase):
         """ test that oledump does not find data where it should not """
         args = ['-d', self.temp_dir]
         for sample_name in ('sample_with_lnk_to_calc.doc', ):
-            oledump.main(args + [join(DATA_BASE_DIR, 'oledump', sample_name), ])
+            full_name = join(DATA_BASE_DIR, 'oledump', sample_name)
+            ret_val = oledump.main(args + [full_name, ])
             if glob(self.temp_dir + 'ole-object-*'):
                 self.fail('found embedded data in {0}'.format(sample_name))
+            self.assertEqual(ret_val, oledump.RETURN_NO_EXTRACT)
 
     def do_test_md5(self, args):
         """ helper for test_md5 and test_md5_args """
@@ -72,7 +74,8 @@ class TestOledump(unittest.TestCase):
 
         data_dir = join(DATA_BASE_DIR, 'oledump')
         for sample_name, expect_extension, expect_hash in EXPECTED_RESULTS:
-            oledump.main(args + [join(data_dir, sample_name), ])
+            ret_val = oledump.main(args + [join(data_dir, sample_name), ])
+            self.assertEqual(ret_val, oledump.RETURN_DID_EXTRACT)
             expect_name = join(self.temp_dir, 'ole-object-00.' + expect_extension)
             if not isfile(expect_name):
                 self.did_fail = True
