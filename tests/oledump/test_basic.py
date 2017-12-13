@@ -5,6 +5,7 @@ from tempfile import mkdtemp
 from shutil import rmtree
 from os.path import join, isfile
 from hashlib import md5
+from glob import glob
 
 # Directory with test data, independent of current working directory
 from tests.test_utils import DATA_BASE_DIR
@@ -51,17 +52,28 @@ class TestOledump(unittest.TestCase):
         """
         self.do_test_md5(['-d', self.temp_dir, '-v', '-i'])
 
+    def test_no_output(self):
+        """ test that oledump does not find data where it should not """
+        args = ['-d', self.temp_dir]
+        for sample_name in ('sample_with_lnk_to_calc.doc', ):
+            oledump.main(args + [join(DATA_BASE_DIR, 'oledump', sample_name), ])
+            if glob(self.temp_dir + 'ole-object-*'):
+                self.fail('found embedded data in {0}'.format(sample_name))
+
     def do_test_md5(self, args):
         """ helper for test_md5 and test_md5_args """
+        # name of sample, extension of embedded file, md5 hash of embedded file
         EXPECTED_RESULTS = (
             ('sample_with_calc_embedded.doc', 'exe', '40e85286357723f326980a3b30f84e4f'),
             ('sample_with_lnk_file.doc', 'lnk', '6aedb1a876d4ad5236f1fbbbeb7274f3'),
+            ('sample_with_lnk_file.pps', 'lnk', '6aedb1a876d4ad5236f1fbbbeb7274f3'),
+            ('sample_with_lnk_file.ppt', 'lnk', '6aedb1a876d4ad5236f1fbbbeb7274f3'),
         )
 
         data_dir = join(DATA_BASE_DIR, 'oledump')
         for sample_name, expect_extension, expect_hash in EXPECTED_RESULTS:
             oledump.main(args + [join(data_dir, sample_name), ])
-            expect_name = join(self.temp_dir, 'oledump0.' + expect_extension)
+            expect_name = join(self.temp_dir, 'ole-object-00.' + expect_extension)
             if not isfile(expect_name):
                 self.did_fail = True
                 self.fail('{0} not created from {1}'.format(expect_name,
