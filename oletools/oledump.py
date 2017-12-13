@@ -92,6 +92,9 @@ CHUNK_SIZE = 4096    # 4k
 # pattern for output files. Will replace: 0 --> count; 1 --> extension
 FILE_NAME_PATTERN = 'ole-object-{0:02d}{1}'
 
+# start of rtf files
+RTF_MAGIC = b'\x7b\x5c\x72\x74'   # == b'{\rt' but does not mess up auto-indent
+
 
 def existing_file(filename):
     """ called by argument parser to see whether given file exists """
@@ -154,8 +157,16 @@ def find_ole_in_ppt(filename):
                         ole.close()
 
 
+def is_rtf(filename):
+    """ read first 4 bytes, compare to RTF_MAGIC """
+    data = ''
+    with open(filename, 'rb') as file_handle:
+        data = file_handle.read(len(RTF_MAGIC))
+    return data == RTF_MAGIC
+
+
 def find_ole(filename):
-    """ try to open somehow as zip or ole or so; raise exception if fail """
+    """ try to open somehow as zip/ole/rtf/... ; raise exception if fail """
     try:
         if olefile.isOleFile(filename):
             if is_ppt(filename):
@@ -188,6 +199,13 @@ def find_ole(filename):
                         ole.close()
                 else:
                     logging.debug('unzip skip: ' + subfile)
+        elif is_rtf(filename):
+            logging.info('is RTF file: ' + filename)
+            rtfp = RtfObjParser(data)
+            rtfp.parse()
+            for rtfobj in rtfp.objects:
+                if rtfobj.is_ole:
+                    raise NotImplementedError('continue here')
         else:
             logging.warning('open failed: ' + filename)
             yield None   # --> leads to non-0 return code
@@ -242,6 +260,7 @@ def unpack_stream(format, stream):
         raise IOError('reached end of stream after {0} of {1} bytes'
                       .format(len(data), n_bytes))
     return struct.unpack(format, data)
+
 
 def has_embed_header(stream, stream_size):
     """ check if the header is of expected format
