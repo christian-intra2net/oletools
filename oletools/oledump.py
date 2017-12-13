@@ -62,7 +62,7 @@ import logging
 import os
 from zipfile import is_zipfile, ZipFile
 from argparse import ArgumentParser, ArgumentTypeError
-from struct import unpack
+import struct
 
 try:
     from oletools.thirdparty import olefile
@@ -189,6 +189,29 @@ def ole_iter_streams(ole):
             stream.close()
 
 
+def unpack_stream(format, stream):
+    """ struct.unpack with reading and checking of data from stream """
+    n_bytes = 0
+    for char in format:
+        if char in '@=<>!':
+            continue   # endianness and stuff
+        elif char in 'cbB?':
+            n_bytes += 1
+        elif char in 'hH':
+            n_bytes += 2
+        elif char in 'iIlLf':
+            n_bytes += 4
+        elif char in 'qQd':
+            n_bytes += 4
+        else:
+            raise ValueError('unexpected character "{0}" in format string'
+                             .format(char))
+    data = stream.read(n_bytes)
+    if len(data) != n_bytes:
+        raise IOError('reached end of stream after {0} of {1} bytes'
+                      .format(len(data), n_bytes))
+    return struct.unpack(format, data)
+
 def has_embed_header(stream, stream_size):
     """ check if the header is of expected format
 
@@ -198,7 +221,7 @@ def has_embed_header(stream, stream_size):
     if stream_size < 6:
         logging.debug('Stream too short ({0})'.format(stream_size))
         return False
-    data_size, version = unpack('<LH', stream.read(6))
+    data_size, version = unpack_stream('<LH', stream)
     if data_size == stream_size-4:
         logging.debug('Stream and data size match ({0})'
                       .format(data_size))
@@ -220,7 +243,11 @@ def read_null_terminated_string(stream):
     """
     chars = []   # array of bytes
     while True:
-        char = ord(stream.read(1))
+        data = stream.read(1)
+        if len(data) != 1:
+            logging.warning('string ended with end-of-stream, not 0 byte')
+            break
+        char = ord(data[0])
         if char == 0:
             break
         else:
@@ -231,7 +258,7 @@ def read_null_terminated_string(stream):
         # have to guess an encoding :-(
         result = None
         chars = bytes(chars)
-        for encoding in 'utf8', 'utf16', 'latin1':
+        for encoding in 'utf16le', 'utf8', 'utf16', 'latin1':
             try:
                 result = chars.decode(encoding)
             except UnicodeError:
@@ -247,17 +274,25 @@ def get_embed_info(stream):
     """ get filenames for embedded file from stream
 
     modeled after oledump.ExtractOle10Native(data) but only reads few bytes
+
+    Returns a size of -1 if size is not contained in stream. That probably
+    means that data is not embedded but only linked from file.
     """
     filename = read_null_terminated_string(stream)
     logging.debug('filename: "{0}"'.format(filename))
     pathname = read_null_terminated_string(stream)
     logging.debug('pathname: "{0}"'.format(pathname))
     logging.debug('unused1: {0[0]}, unused2: {0[1]}'
-                  .format(unpack('<LL', stream.read(8))))
+                  .format(unpack_stream('<LL', stream)))
     temppathname = read_null_terminated_string(stream)
     logging.debug('temppathname: "{0}"'.format(temppathname))
-    size_embedded = unpack('<L', stream.read(4))[0]
-    logging.debug('size embedded: {0}'.format(size_embedded))
+    try:
+        size_embedded = unpack_stream('<L', stream)[0]
+        logging.debug('size embedded: {0}'.format(size_embedded))
+    except IOError:
+        logging.debug('Data is not embedded (empty size field). '
+                      'Probably a link')
+        size_embedded = -1
 
     return (filename, pathname, temppathname), size_embedded
 
@@ -321,6 +356,8 @@ def main(cmd_line_args=None):
 
                 # get filename options and size of embedded data
                 filenames, embedded_size = get_embed_info(stream)
+                if embedded_size == -1:
+                    continue    # data is not embedded after all
 
                 # make paths compatible with current os
                 if os.name in ('posix', 'mac'):  # convert c:\a.ext --> c/a.ext
