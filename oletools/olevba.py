@@ -252,6 +252,7 @@ import zlib
 import email  # for MHTML parsing
 import string # for printable
 import json   # for json output mode (argument --json)
+from random import random
 
 # import lxml or ElementTree for XML parsing:
 try:
@@ -1980,7 +1981,7 @@ def detect_vba_strings(vba_code):
     #            Otherwise, start and end offsets are incorrect.
     vba_code = vba_code.expandtabs()
     # Split the VBA code line by line to avoid MemoryError on large scripts:
-    for vba_line in vba_code.splitlines():
+    for vba_line in split_vba_code(vba_code):
         for tokens, start, end in vba_expr_str.scanString(vba_line):
             encoded = vba_line[start:end]
             decoded = tokens[0]
@@ -1999,6 +2000,42 @@ def detect_vba_strings(vba_code):
             # else:
                 # print 'VBA STRING: encoded=%r => decoded=%r' % (encoded, decoded)
     return results
+
+
+#: max length of vba code lines that is analyzed in one go. Bigger code chunks
+#: are split. Reduce this if you run into memory trouble
+MAX_CODE_LINE_LEN = 32000
+MAX_CODE_LINE_OVERLAP = 500
+
+
+def split_vba_code(vba_code):
+    """ Split vba code (or what is suspected to be one) into manageable parts
+
+    Tries a regular :py:meth:`str.splitlines`, and if that fails (e.g. in case
+    of non-vba-code in text files or mis-interpreted rtf) splits the string at
+    random into large overlapping chunks.
+
+    This prevents MemoryErrors in the following parsing of that line, most of
+    all if deobfuscating.
+    """
+    if MAX_CODE_LINE_LEN < 10:
+        raise ValueError('unreasonably small value for max code line length')
+    if MAX_CODE_LINE_OVERLAP < 0:
+        raise ValueError('unreasonably small value for max code line overlap')
+    if MAX_CODE_LINE_OVERLAP > MAX_CODE_LINE_LEN:
+        raise ValueError('overlap must be smaller than chunks')
+    HALF_LEN = int(MAX_CODE_LINE_LEN//2)
+    HALF_OVERLAP = int(MAX_CODE_LINE_OVERLAP//2)
+
+    for line in vba_code.splitlines():
+        line_len = len(line)
+        start_idx = 0
+        while (line_len - start_idx) > MAX_CODE_LINE_LEN:
+            chunk_size = HALF_LEN + int(random() * HALF_LEN)
+            yield line[start_idx:start_idx+chunk_size]
+            overlap = HALF_OVERLAP + int(random() * HALF_OVERLAP)
+            start_idx += max(1, chunk_size - overlap)
+        yield line[start_idx:]   # yield the rest
 
 
 def json2ascii(json_obj, encoding='utf8', errors='replace'):
