@@ -2029,9 +2029,17 @@ def split_vba_code(vba_code):
 
     for line in vba_code.splitlines():
         line_len = len(line)
+        mean_idx_add = 1.5 * HALF_LEN - 1.5 * HALF_OVERLAP
+        n_chunks = int(line_len / mean_idx_add)    # only an approximation
         start_idx = 0
+        chunk_idx = 0
         while (line_len - start_idx) > MAX_CODE_LINE_LEN:
+            chunk_idx += 1
             chunk_size = HALF_LEN + int(random() * HALF_LEN)
+            log.debug('splitting line of size {0}, yielding chunk of size {1},'
+                      ' starting at {2} (number {3} of approx. {4})'
+                      .format(line_len, chunk_size, start_idx, chunk_idx,
+                              n_chunks))
             yield line[start_idx:start_idx+chunk_size]
             overlap = HALF_OVERLAP + int(random() * HALF_OVERLAP)
             start_idx += max(1, chunk_size - overlap)
