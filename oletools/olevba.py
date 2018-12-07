@@ -761,7 +761,7 @@ RE_PATTERNS = (
 )
 
 # regex to detect strings encoded in hexadecimal
-re_hex_string = re.compile(r'(?:[0-9A-Fa-f]{2}){4,}')
+re_hex_string = re.compile(u'(?:[0-9A-Fa-f]{2}){4,}')
 
 # regex to detect strings encoded in base64
 #re_base64_string = re.compile(r'"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"')
@@ -1822,13 +1822,13 @@ def vba_collapse_long_lines(vba_code):
     Parse a VBA module code to detect continuation line characters (underscore) and
     collapse split lines. Continuation line characters are replaced by spaces.
 
-    :param vba_code: str, VBA module code
-    :return: str, VBA module code with long lines collapsed
+    :param vba_code: unicode, VBA module code
+    :return: unicode, VBA module code with long lines collapsed
     """
     # TODO: use a regex instead, to allow whitespaces after the underscore?
-    vba_code = vba_code.replace(' _\r\n', ' ')
-    vba_code = vba_code.replace(' _\r', ' ')
-    vba_code = vba_code.replace(' _\n', ' ')
+    vba_code = vba_code.replace(u' _\r\n', u' ')
+    vba_code = vba_code.replace(u' _\r', u' ')
+    vba_code = vba_code.replace(u' _\n', u' ')
     return vba_code
 
 
@@ -1937,12 +1937,28 @@ def detect_patterns(vba_code, obfuscation=None):
     return results
 
 
-def detect_hex_strings(vba_code):
+def re_encode_str(byte_str, vba_codecs):
+    """Make unicode from result of unhexlify."""
+            did_append = False
+            # decoded is a byte string (e.g. '\xc3\xbc');
+            # need to create unicode (e.g. u'\xfc' (u-umlaut with utf8)) from it
+            for codec in vba_codecs or ('ascii', 'utf8'):
+                try:
+                    did_append = True
+                    break    # the first encoding that worked is assumed correct
+                except UnicodeEncodeError:
+                    pass     # just try the next encoding
+            if did_append:
+            else:
+                log.warning('Failed to decode hex string {!r}. Leave as-is.'
+                            .format(value))
+
+def detect_hex_strings(vba_code, vba_codecs=None):
     """
     Detect if the VBA code contains strings encoded in hexadecimal.
 
-    :param vba_code: str, VBA source code
-    :return: list of str tuples (encoded string, decoded string)
+    :param vba_code: unicode, VBA source code
+    :return: list of unicode tuples (encoded string, decoded string)
     """
     results = []
     found = set()
@@ -1950,8 +1966,12 @@ def detect_hex_strings(vba_code):
         value = match.group()
         if value not in found:
             decoded = binascii.unhexlify(value)
-            results.append((value, decoded))
-            found.add(value)
+            unicoded = re_encode_str(decoded, vba_codecs or ['ascii', 'utf8])
+            if unicoded is not None
+                results.append((value, unicoded))
+                found.add(value)
+
+
     return results
 
 
@@ -2129,14 +2149,15 @@ class VBA_Scanner(object):
     suspicious keywords, IOCs, auto-executable macros, etc.
     """
 
-    def __init__(self, vba_code):
+    def __init__(self, vba_code, vba_codecs=None):
         """
         VBA_Scanner constructor
 
-        :param vba_code: str, VBA source code to be analyzed
+        :param vba_code: unicode, VBA source code to be analyzed
         """
         # join long lines ending with " _":
         self.code = vba_collapse_long_lines(vba_code)
+        self.codecs = vba_codecs or []
         self.code_hex = ''
         self.code_hex_rev = ''
         self.code_rev_hex = ''
@@ -2167,36 +2188,37 @@ class VBA_Scanner(object):
         (type = 'AutoExec', 'Suspicious', 'IOC', 'Hex String', 'Base64 String' or 'Dridex String')
         """
         # First, detect and extract hex-encoded strings:
-        self.hex_strings = detect_hex_strings(self.code)
+        self.hex_strings = detect_hex_strings(self.code, self.codecs)
         # detect if the code contains StrReverse:
         self.strReverse = False
         if 'strreverse' in self.code.lower(): self.strReverse = True
         # Then append the decoded strings to the VBA code, to detect obfuscated IOCs and keywords:
         for encoded, decoded in self.hex_strings:
-            self.code_hex += '\n' + decoded
+            self.code_hex += u'\n' + decoded
             # if the code contains "StrReverse", also append the hex strings in reverse order:
             if self.strReverse:
                 # StrReverse after hex decoding:
-                self.code_hex_rev += '\n' + decoded[::-1]
+                self.code_hex_rev += u'\n' + decoded[::-1]
                 # StrReverse before hex decoding:
-                self.code_rev_hex += '\n' + binascii.unhexlify(encoded[::-1])
+                raise NotImplementedError('continue here making this work with unicode; call re_encode_str')
+                self.code_rev_hex += u'\n' + binascii.unhexlify(encoded[::-1])
                 #example: https://malwr.com/analysis/NmFlMGI4YTY1YzYyNDkwNTg1ZTBiZmY5OGI3YjlhYzU/
         #TODO: also append the full code reversed if StrReverse? (risk of false positives?)
         # Detect Base64-encoded strings
         self.base64_strings = detect_base64_strings(self.code)
         for encoded, decoded in self.base64_strings:
-            self.code_base64 += '\n' + decoded
+            self.code_base64 += u'\n' + decoded
         # Detect Dridex-encoded strings
         self.dridex_strings = detect_dridex_strings(self.code)
         for encoded, decoded in self.dridex_strings:
-            self.code_dridex += '\n' + decoded
+            self.code_dridex += u'\n' + decoded
         # Detect obfuscated strings in VBA expressions
         if deobfuscate:
             self.vba_strings = detect_vba_strings(self.code)
         else:
             self.vba_strings = []
         for encoded, decoded in self.vba_strings:
-            self.code_vba += '\n' + decoded
+            self.code_vba += u'\n' + decoded
         results = []
         self.autoexec_keywords = []
         self.suspicious_keywords = []
@@ -2278,20 +2300,23 @@ class VBA_Scanner(object):
                 len(self.dridex_strings), len(self.vba_strings))
 
 
-def scan_vba(vba_code, include_decoded_strings, deobfuscate=False):
+def scan_vba(vba_code, include_decoded_strings, deobfuscate=False,
+             vba_codecs=None):
     """
     Analyze the provided VBA code to detect suspicious keywords,
     auto-executable macros, IOC patterns, obfuscation patterns
     such as hex-encoded strings.
     (shortcut for VBA_Scanner(vba_code).scan())
 
-    :param vba_code: str, VBA source code to be analyzed
+    :param vba_code: unicode, VBA source code to be analyzed
     :param include_decoded_strings: bool, if True all encoded strings will be included with their decoded content.
     :param deobfuscate: bool, if True attempt to deobfuscate VBA expressions (slow)
+    :param vba_codecs: list/tuple of codecs used to decode vba_code
     :return: list of tuples (type, keyword, description)
     (type = 'AutoExec', 'Suspicious', 'IOC', 'Hex String', 'Base64 String' or 'Dridex String')
     """
-    return VBA_Scanner(vba_code).scan(include_decoded_strings, deobfuscate)
+    return VBA_Scanner(vba_code, vba_codecs).scan(include_decoded_strings,
+                                                  deobfuscate)
 
 
 #=== CLASSES =================================================================
@@ -2348,6 +2373,7 @@ class VBA_Parser(object):
         self.vba_forms = None
         self.contains_macros = None # will be set to True or False by detect_macros
         self.vba_code_all_modules = None # to store the source code of all modules
+        self.vba_code_all_codecs = None  # to store all vba_codecs encountered
         # list of tuples for each module: (subfilename, stream_path, vba_filename, vba_code)
         self.modules = None
         # Analysis results: list of tuples (type, keyword, description) - See VBA_Scanner
@@ -2700,6 +2726,7 @@ class VBA_Parser(object):
         log.info('Opening text file %s' % self.filename)
         # directly store the source code:
         self.vba_code_all_modules = data
+        self.vba_code_all_codecs = set()
         self.contains_macros = True
         # set type only if parsing succeeds
         self.type = TYPE_TEXT
@@ -2953,14 +2980,13 @@ class VBA_Parser(object):
         self.nb_macros = len(self.modules)
         return self.modules
 
-
-
     def analyze_macros(self, show_decoded_strings=False, deobfuscate=False):
         """
         runs extract_macros and analyze the source code of all VBA macros
         found in the file.
         All results are stored in self.analysis_results.
         If called more than once, simply returns the previous results.
+        Decodes the vba code from bytes to unicode.
         """
         if self.detect_vba_macros():
             # if the analysis was already done, avoid doing it twice:
@@ -2968,14 +2994,23 @@ class VBA_Parser(object):
                 return self.analysis_results
             # variable to merge source code from all modules:
             if self.vba_code_all_modules is None:
-                self.vba_code_all_modules = ''
+                self.vba_code_all_modules = u''
+                self.vba_code_all_codecs = set()
                 for (_, _, _, vba_code, vba_codec) in self.extract_all_macros():
                     #TODO: filter code? (each module)
-                    self.vba_code_all_modules += vba_code + '\n'
+                    self.vba_code_all_modules += vba_code.decode(vba_codec,
+                                                                 'replace')
+                    self.vba_code_all_modules += u'\n'
+                    self.vba_code_all_codecs.add(vba_codec)
                 for (_, _, form_string) in self.extract_form_strings():
-                    self.vba_code_all_modules += form_string + '\n'
+                    form_codec = 'utf8'     # have to guess some encoding here
+                    self.vba_code_all_modules += form_string.decode(form_codec,
+                                                                    'replace')
+                    self.vba_code_all_modules += u'\n'
+                    self.vba_code_all_codecs.add(form_codec)
             # Analyze the whole code at once:
-            scanner = VBA_Scanner(self.vba_code_all_modules)
+            scanner = VBA_Scanner(self.vba_code_all_modules,
+                                  self.vba_code_all_codecs)
             self.analysis_results = scanner.scan(show_decoded_strings, deobfuscate)
             autoexec, suspicious, iocs, hexstrings, base64strings, dridex, vbastrings = scanner.scan_summary()
             self.nb_autoexec += autoexec
@@ -3280,6 +3315,7 @@ class VBA_Parser_CLI(VBA_Parser):
                 #print 'Contains VBA Macros:'
                 for (subfilename, stream_path, vba_filename, vba_code, vba_codec) \
                         in self.extract_all_macros():
+                    vba_code = vba_code.decode(vba_codec, 'replace')
                     if hide_attributes:
                         # hide attribute lines:
                         vba_code_filtered = filter_vba(vba_code)
@@ -3291,19 +3327,19 @@ class VBA_Parser_CLI(VBA_Parser):
                     if display_code:
                         print('- ' * 39)
                         # detect empty macros:
-                        if vba_code_filtered.strip() == '':
+                        if vba_code_filtered.strip() == u'':
                             print('(empty macro)')
                         else:
                             # check if the VBA code contains special characters such as backspace (issue #358)
-                            if b'\x08' in vba_code_filtered:
+                            if u'\x08' in vba_code_filtered:
                                 log.warning('The VBA code contains special characters such as backspace, that may be used for obfuscation.')
                                 if sys.stdout.isatty():
                                     # if the standard output is the console, we'll display colors
-                                    backspace = colorclass.Color(b'{autored}\\x08{/red}')
+                                    backspace = colorclass.Color(u'{autored}\\x08{/red}')
                                 else:
-                                    backspace = b'\\x08'
+                                    backspace = u'\\x08'
                                 # replace backspace by "\x08" for display
-                                vba_code_filtered = vba_code_filtered.replace(b'\x08', backspace)
+                                vba_code_filtered = vba_code_filtered.replace(u'\x08', backspace)
                             vba_code_filtered = colorclass.Color(self.colorize_keywords(vba_code_filtered))
                             print(vba_code_filtered)
                 for (subfilename, stream_path, form_string) in self.extract_form_strings():
@@ -3383,6 +3419,7 @@ class VBA_Parser_CLI(VBA_Parser):
             if self.detect_vba_macros():
                 for (subfilename, stream_path, vba_filename, vba_code, vba_codec) \
                         in self.extract_all_macros():
+                    vba_code = vba_code.decode(vba_codec, 'replace')
                     curr_macro = {}
                     if hide_attributes:
                         # hide attribute lines:
