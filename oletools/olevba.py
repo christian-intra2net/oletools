@@ -1315,7 +1315,8 @@ def _extract_vba(ole, vba_root, project_path, dir_path, relaxed=False):
     vba_project: path to the PROJECT stream
     :param relaxed: If True, only create info/debug log entry if data is not as expected
                     (e.g. opening substream fails); if False, raise an error in this case
-    This is a generator, yielding (stream path, VBA filename, VBA source code) for each VBA code stream
+    This is a generator, yielding 4-tuples (stream path, VBA filename,
+    VBA source code, VBA codepage) for each VBA code stream
     """
     # Open the PROJECT stream:
     project = ole.openstream(project_path)
@@ -1795,8 +1796,7 @@ def _extract_vba(ole, vba_root, project_path, dir_path, relaxed=False):
                 # case-insensitive search in the code_modules dict to find the file extension:
                 filext = code_modules.get(modulename_modulename.lower(), 'bin')
                 filename = '{0}.{1}'.format(modulename_modulename, filext)
-                #TODO: also yield the codepage so that callers can decode it properly
-                yield (code_path, filename, code_data)
+                yield (code_path, filename, code_data, vba_codec)
                 # print '-'*79
                 # print filename
                 # print ''
@@ -2870,7 +2870,9 @@ class VBA_Parser(object):
         """
         Extract and decompress source code for each VBA macro found in the file
 
-        Iterator: yields (filename, stream_path, vba_filename, vba_code) for each VBA macro found
+        Iterator: yields 5-tuples (filename, stream_path, vba_filename,
+                  vba_code, vba_codec) for each VBA macro found.
+        vba_code is a byte-string.
         If the file is OLE, filename is the path of the file.
         If the file is OpenXML, filename is the path of the OLE subfile containing VBA macros
         within the zip archive, e.g. word/vbaProject.bin.
@@ -2896,12 +2898,13 @@ class VBA_Parser(object):
                 # extract all VBA macros from that VBA root storage:
                 # The function _extract_vba may fail on some files (issue #132)
                 try:
-                    for stream_path, vba_filename, vba_code in \
+                    for stream_path, vba_filename, vba_code, vba_codec in \
                             _extract_vba(self.ole_file, vba_root, project_path,
                                          dir_path, self.relaxed):
                         # store direntry ids in a set:
                         vba_stream_ids.add(self.ole_file._find(stream_path))
-                        yield (self.filename, stream_path, vba_filename, vba_code)
+                        yield (self.filename, stream_path, vba_filename,
+                               vba_code, vba_codec)
                 except Exception as e:
                     log.exception('Error in _extract_vba')
             # Also look for VBA code in any stream including orphans
@@ -2939,13 +2942,14 @@ class VBA_Parser(object):
         """
         Extract and decompress source code for each VBA macro found in the file
         by calling extract_macros(), store the results as a list of tuples
-        (filename, stream_path, vba_filename, vba_code) in self.modules.
+        (filename, stream_path, vba_filename, vba_code, vba_codec) in
+        self.modules.
         See extract_macros for details.
         """
         if self.modules is None:
             self.modules = []
-            for (subfilename, stream_path, vba_filename, vba_code) in self.extract_macros():
-                self.modules.append((subfilename, stream_path, vba_filename, vba_code))
+            for macro_info in self.extract_macros():
+                self.modules.append(macro_info)
         self.nb_macros = len(self.modules)
         return self.modules
 
@@ -2965,7 +2969,7 @@ class VBA_Parser(object):
             # variable to merge source code from all modules:
             if self.vba_code_all_modules is None:
                 self.vba_code_all_modules = ''
-                for (_, _, _, vba_code) in self.extract_all_macros():
+                for (_, _, _, vba_code, vba_codec) in self.extract_all_macros():
                     #TODO: filter code? (each module)
                     self.vba_code_all_modules += vba_code + '\n'
                 for (_, _, form_string) in self.extract_form_strings():
@@ -3274,7 +3278,8 @@ class VBA_Parser_CLI(VBA_Parser):
                 # run analysis before displaying VBA code, in order to colorize found keywords
                 self.run_analysis(show_decoded_strings=show_decoded_strings, deobfuscate=deobfuscate)
                 #print 'Contains VBA Macros:'
-                for (subfilename, stream_path, vba_filename, vba_code) in self.extract_all_macros():
+                for (subfilename, stream_path, vba_filename, vba_code, vba_codec) \
+                        in self.extract_all_macros():
                     if hide_attributes:
                         # hide attribute lines:
                         vba_code_filtered = filter_vba(vba_code)
@@ -3376,7 +3381,8 @@ class VBA_Parser_CLI(VBA_Parser):
             result['type'] = self.type
             macros = []
             if self.detect_vba_macros():
-                for (subfilename, stream_path, vba_filename, vba_code) in self.extract_all_macros():
+                for (subfilename, stream_path, vba_filename, vba_code, vba_codec) \
+                        in self.extract_all_macros():
                     curr_macro = {}
                     if hide_attributes:
                         # hide attribute lines:
