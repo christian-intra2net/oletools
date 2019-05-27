@@ -74,7 +74,6 @@ PARENT_DIR = os.path.normpath(os.path.dirname(os.path.dirname(
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 del PARENT_DIR
-from oletools import oleid
 from oletools.common.log_helper import log_helper
 
 
@@ -254,6 +253,7 @@ class OleRecordStream(object):
             yield rec_object
 
     def close(self):
+        """Close this stream (i.e. the stream given in constructor)."""
         self.stream.close()
 
     def __str__(self):
