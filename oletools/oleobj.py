@@ -492,72 +492,6 @@ class OleObject(object):
             self.extra_data = data[index+self.data_size:]
 
 
-def sanitize_filename(filename, replacement='_', max_length=200):
-    """compute basename of filename. Replaces all non-whitelisted characters.
-       The returned filename is always a ascii basename of the file."""
-    basepath = os.path.basename(filename).strip()
-    sane_fname = re.sub(u'[^a-zA-Z0-9.\\-_ ]', replacement, basepath)
-    sane_fname = str(sane_fname)    # py3: does nothing;   py2: unicode --> str
-
-    while ".." in sane_fname:
-        sane_fname = sane_fname.replace('..', '.')
-
-    while "  " in sane_fname:
-        sane_fname = sane_fname.replace('  ', ' ')
-
-    if not filename:
-        sane_fname = 'NONAME'
-
-    # limit filename length
-    if max_length:
-        sane_fname = sane_fname[:max_length]
-
-    return sane_fname
-
-
-def find_ole_in_ppt(filename):
-    """ find ole streams in ppt
-
-    This may be a bit confusing: we get an ole file (or its name) as input and
-    as output we produce possibly several ole files. This is because the
-    data structure can be pretty nested:
-    A ppt file has many streams that consist of records. Some of these records
-    can contain data which contains data for another complete ole file (which
-    we yield). This embedded ole file can have several streams, one of which
-    can contain the actual embedded file we are looking for (caller will check
-    for these).
-    """
-    ppt_file = None
-    try:
-        ppt_file = PptFile(filename)
-        for stream in ppt_file.iter_streams():
-            for record_idx, record in enumerate(stream.iter_records()):
-                if isinstance(record, PptRecordExOleVbaActiveXAtom):
-                    ole = None
-                    try:
-                        data_start = next(record.iter_uncompressed())
-                        if data_start[:len(olefile.MAGIC)] != olefile.MAGIC:
-                            continue   # could be ActiveX control / VBA Storage
-
-                        # otherwise, this should be an OLE object
-                        log.debug('Found record with embedded ole object in '
-                                  'ppt (stream "{0}", record no {1})'
-                                  .format(stream.name, record_idx))
-                        ole = record.get_data_as_olefile()
-                        yield ole
-                    except IOError:
-                        log.warning('Error reading data from {0} stream or '
-                                    'interpreting it as OLE object'
-                                    .format(stream.name))
-                        log.debug('', exc_info=True)
-                    finally:
-                        if ole is not None:
-                            ole.close()
-    finally:
-        if ppt_file is not None:
-            ppt_file.close()
-
-
 class FakeFile(io.RawIOBase):
     """ create file-like object from data without copying it
 
@@ -624,6 +558,75 @@ class FakeFile(io.RawIOBase):
     def tell(self):
         """ tell where in file we are positioned """
         return self.pos
+
+
+# === FUNCTIONS ===============================================================
+
+
+def sanitize_filename(filename, replacement='_', max_length=200):
+    """compute basename of filename. Replaces all non-whitelisted characters.
+       The returned filename is always a ascii basename of the file."""
+    basepath = os.path.basename(filename).strip()
+    sane_fname = re.sub(u'[^a-zA-Z0-9.\\-_ ]', replacement, basepath)
+    sane_fname = str(sane_fname)    # py3: does nothing;   py2: unicode --> str
+
+    while ".." in sane_fname:
+        sane_fname = sane_fname.replace('..', '.')
+
+    while "  " in sane_fname:
+        sane_fname = sane_fname.replace('  ', ' ')
+
+    if not filename:
+        sane_fname = 'NONAME'
+
+    # limit filename length
+    if max_length:
+        sane_fname = sane_fname[:max_length]
+
+    return sane_fname
+
+
+def find_ole_in_ppt(filename):
+    """ find ole streams in ppt
+
+    This may be a bit confusing: we get an ole file (or its name) as input and
+    as output we produce possibly several ole files. This is because the
+    data structure can be pretty nested:
+    A ppt file has many streams that consist of records. Some of these records
+    can contain data which contains data for another complete ole file (which
+    we yield). This embedded ole file can have several streams, one of which
+    can contain the actual embedded file we are looking for (caller will check
+    for these).
+    """
+    ppt_file = None
+    try:
+        ppt_file = PptFile(filename)
+        for stream in ppt_file.iter_streams():
+            for record_idx, record in enumerate(stream.iter_records()):
+                if isinstance(record, PptRecordExOleVbaActiveXAtom):
+                    ole = None
+                    try:
+                        data_start = next(record.iter_uncompressed())
+                        if data_start[:len(olefile.MAGIC)] != olefile.MAGIC:
+                            continue   # could be ActiveX control / VBA Storage
+
+                        # otherwise, this should be an OLE object
+                        log.debug('Found record with embedded ole object in '
+                                  'ppt (stream "{0}", record no {1})'
+                                  .format(stream.name, record_idx))
+                        ole = record.get_data_as_olefile()
+                        yield ole
+                    except IOError:
+                        log.warning('Error reading data from {0} stream or '
+                                    'interpreting it as OLE object'
+                                    .format(stream.name))
+                        log.debug('', exc_info=True)
+                    finally:
+                        if ole is not None:
+                            ole.close()
+    finally:
+        if ppt_file is not None:
+            ppt_file.close()
 
 
 def find_ole(filename, data, xml_parser=None):
